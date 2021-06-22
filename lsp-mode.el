@@ -6077,6 +6077,8 @@ textDocument/didOpen for the new file."
 (advice-add 'set-visited-file-name :around #'lsp--on-set-visited-file-name)
 
 (defvar lsp--flushing-delayed-changes nil)
+(defvar lsp--sending-messages nil)
+(defvar lsp--queued-messages nil)
 
 (defun lsp--send-no-wait (message proc)
   "Send MESSAGE to PROC without waiting for further output."
@@ -6085,10 +6087,18 @@ textDocument/didOpen for the new file."
     (let ((lsp--flushing-delayed-changes t))
       (lsp--flush-delayed-changes)))
 
-  (condition-case err
-      (process-send-string proc message)
-    ('error (lsp--error "Sending to process failed with the following error: %s"
-                        (error-message-string err)))))
+  (push (cons message proc) lsp--queued-messages)
+  (unless lsp--sending-messages
+    (let ((lsp--sending-messages t))
+      (while lsp--queued-messages
+        (let ((messages (nreverse lsp--queued-messages)))
+          (setq lsp--queued-messages nil)
+          (mapc (-lambda ((message . proc))
+                  (condition-case err
+                      (process-send-string proc message)
+                    ('error (lsp--error "Sending to process failed with the following error: %s"
+                                        (error-message-string err)))))
+                messages))))))
 
 (define-error 'lsp-parse-error
   "Error parsing message from language server" 'lsp-error)
